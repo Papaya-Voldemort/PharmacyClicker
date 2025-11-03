@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pharmacy Clicker - Educational Satire</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- Header -->
+        <header id="game-header">
+            <div class="header-left">
+                <h1 id="game-title">☀️ Sunny Side Pharmacy</h1>
+                <p class="subtitle">Your friendly neighborhood pharmacy!</p>
+            </div>
+            <div class="header-right">
+                <div id="clock-container">
+                    <div class="time-display">
+                        <span id="game-time">12:00 PM</span>
+                        <span id="day-counter">Day 1</span>
+                    </div>
+                    <div class="time-bar">
+                        <div id="time-progress"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Game Area -->
+        <main id="game-main">
+            <!-- Left Panel - Stats and Info -->
+            <aside id="left-panel">
+                <div class="panel-section">
+                    <h2>💰 Money</h2>
+                    <div class="money-display">
+                        <div class="money-row">
+                            <span>Day Funds:</span>
+                            <span id="day-money">$0</span>
+                        </div>
+                        <div class="money-row">
+                            <span>Night Funds:</span>
+                            <span id="night-money">$0</span>
+                        </div>
+                        <div class="money-row total">
+                            <span>Total Wealth:</span>
+                            <span id="total-money">$0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-section" id="stats-section">
+                    <h2>📊 Stats</h2>
+                    <div class="stat-row">
+                        <span>Per Click:</span>
+                        <span id="click-value">$1</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Per Second:</span>
+                        <span id="per-second">$0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Total Earned:</span>
+                        <span id="total-earned">$0</span>
+                    </div>
+                </div>
+
+                <!-- Market Panel (Night Only) -->
+                <div class="panel-section" id="market-panel" style="display: none;">
+                    <h2>📈 Black Market</h2>
+                    <p class="market-subtitle">Tonight's Demand</p>
+                    <div id="market-list"></div>
+                </div>
+            </aside>
+
+            <!-- Center - Main Click Area -->
+            <section id="click-area">
+                <div id="click-zone">
+                    <div id="click-button">
+                        <span id="click-text">Fill Prescription</span>
+                        <div id="click-icon">💊</div>
+                    </div>
+                </div>
+                <div id="click-feedback"></div>
+            </section>
+
+            <!-- Right Panel - Upgrades -->
+            <aside id="right-panel">
+                <div class="panel-section">
+                    <h2 id="upgrade-title">🛒 Upgrades</h2>
+                    <div id="upgrades-container">
+                        <!-- Day Upgrades -->
+                        <div class="upgrade-group" id="day-upgrades">
+                            <h3>Pharmacy Upgrades</h3>
+                            <div id="day-upgrade-list"></div>
+                        </div>
+                        
+                        <!-- Night Upgrades -->
+                        <div class="upgrade-group" id="night-upgrades" style="display: none;">
+                            <h3>Underground Upgrades</h3>
+                            <div id="night-upgrade-list"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Inventory (Night Mode) -->
+                <div class="panel-section" id="inventory-panel" style="display: none;">
+                    <h2>💼 Inventory</h2>
+                    <div id="inventory-list"></div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Footer -->
+        <footer id="game-footer">
+            <button id="save-button" class="footer-btn">💾 Save Game</button>
+            <button id="reset-button" class="footer-btn">🔄 Reset</button>
+            <div id="save-indicator"></div>
+            <p class="disclaimer">⚠️ Educational Satire - All content is fictional and for entertainment purposes only</p>
+        </footer>
+    </div>
+
+    <!-- Particle container for click effects -->
+    <div id="particles-container"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
