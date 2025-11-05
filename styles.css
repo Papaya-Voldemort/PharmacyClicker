@@ -422,6 +422,27 @@ body {
     transform: scale(0.95);
 }
 
+/* Auto-Fulfillment Toggle Button */
+.auto-toggle-button {
+    background: white;
+    color: #667eea;
+    border: 2px solid #667eea;
+    padding: 0.4rem 0.75rem;
+    border-radius: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    margin-bottom: 0.5rem;
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.auto-toggle-button:hover {
+    opacity: 0.95;
+}
+.auto-toggle-button.enabled {
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: white;
+    border-color: #059669;
+}
+
 /* Upgrades Styles */
 .upgrades-container {
     display: flex;

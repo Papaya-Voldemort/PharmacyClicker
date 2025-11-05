@@ -14,7 +14,10 @@ const gameState = {
     nextOrderId: 1,
     customerTier: 'bronze',
     upgrades: {},
-    autoProducers: {}
+    autoProducers: {},
+    autoEmployee: false,
+    autoEmployeeEnabled: true,
+    orderSpawnInterval: 8000, // ms between order spawns (can be reduced by upgrades)
 };
 
 // ===========================
@@ -160,10 +163,41 @@ const upgradeDefinitions = [
         type: 'auto'
     },
     {
+        id: 'autoEmployee',
+        name: '🤖 Auto-Fulfillment Employee',
+        description: 'Automatically fulfills orders you have resources for',
+        baseCost: 500,
+        costMultiplier: 1.25,
+        benefit: 'Auto-fulfill orders',
+        effect: () => { gameState.autoEmployee = true; gameState.autoEmployeeEnabled = true; },
+        type: 'automation',
+        oneTime: true
+    },
+    {
+        id: 'customerFlow1',
+        name: '📣 Local Promotions',
+        description: 'Increase customer arrival rate (reduce spawn interval)',
+        baseCost: 2000,
+        costMultiplier: 1.5,
+        benefit: 'Faster customers',
+        effect: () => { gameState.orderSpawnInterval = Math.max(2000, Math.floor(gameState.orderSpawnInterval * 0.8)); },
+        type: 'reputation'
+    },
+    {
+        id: 'customerFlow2',
+        name: '📢 Regional Promotions',
+        description: 'Further increase customer arrival rate',
+        baseCost: 25000,
+        costMultiplier: 1.6,
+        benefit: 'Even faster customers',
+        effect: () => { gameState.orderSpawnInterval = Math.max(1000, Math.floor(gameState.orderSpawnInterval * 0.7)); },
+        type: 'reputation'
+    },
+    {
         id: 'reputation1',
         name: '⭐ Local Advertising',
         description: 'Attract Silver tier customers',
-        baseCost: 5000,
+        baseCost: 1000,
         costMultiplier: 3,
         benefit: 'Better customers',
         effect: () => {
@@ -212,10 +246,12 @@ upgradeDefinitions.forEach(def => {
 // Customer Tier System
 // ===========================
 const customerTiers = {
-    bronze: { name: 'Bronze', payMultiplier: 1, color: '#cd7f32' },
-    silver: { name: 'Silver', payMultiplier: 1.5, color: '#c0c0c0' },
-    gold: { name: 'Gold', payMultiplier: 2.5, color: '#ffd700' },
-    platinum: { name: 'Platinum', payMultiplier: 5, color: '#e5e4e2' }
+    // itemMultiplier increases how many items the customer requests
+    // it also increases how much they pay per item (used in payment calculation)
+    bronze: { name: 'Bronze', payMultiplier: 1, itemMultiplier: 1, color: '#cd7f32' },
+    silver: { name: 'Silver', payMultiplier: 3, itemMultiplier: 1.5, color: '#c0c0c0' },
+    gold: { name: 'Gold', payMultiplier: 5, itemMultiplier: 2, color: '#ffd700' },
+    platinum: { name: 'Platinum', payMultiplier: 10, itemMultiplier: 3, color: '#e5e4e2' }
 };
 
 // ===========================
@@ -238,23 +274,28 @@ function generateOrder() {
     const availablePillTypes = Object.keys(pillTypes);
     for (let i = 0; i < numItems; i++) {
         const pillType = availablePillTypes[Math.floor(Math.random() * availablePillTypes.length)];
-        const quantity = Math.ceil(1 + Math.random() * 9); // 1-10 pills
+        // base quantity 1-10, then scale by tier.itemMultiplier so higher tiers ask for more
+        const baseQty = Math.ceil(1 + Math.random() * 9); // 1-10 pills
+        const quantity = Math.max(1, Math.ceil(baseQty * (tier.itemMultiplier || 1)));
         items.push({ type: pillType, quantity });
     }
-    
-    // Calculate total payment based on items and tier
+
+    // Calculate total payment based on items and tier.
+    // We scale payment per item by tier.itemMultiplier as well so higher tiers pay more per pill.
     const basePayment = items.reduce((sum, item) => {
         return sum + (pillTypes[item.type].baseValue * item.quantity);
     }, 0);
-    
-    const payment = Math.floor(basePayment * tier.payMultiplier * (0.8 + Math.random() * 0.4));
+
+    const payment = Math.floor(basePayment * (tier.payMultiplier || 1) * (tier.itemMultiplier || 1) * (0.8 + Math.random() * 0.4));
     
     const order = {
         id: gameState.nextOrderId++,
         customer: customerNames[Math.floor(Math.random() * customerNames.length)],
         items: items,
-        payment: payment,
-        tier: gameState.customerTier
+    payment: payment,
+    tier: gameState.customerTier,
+    countdown: 30, // seconds until customer leaves (live countdown)
+    createdAt: Date.now()
     };
     
     gameState.orders.push(order);
@@ -287,6 +328,42 @@ function fulfillOrder(orderId) {
     updateDisplay();
     renderOrders();
 }
+
+    function autoFulfillOrders() {
+        if (!gameState.autoEmployee || !gameState.autoEmployeeEnabled) return;
+        gameState.orders.forEach(order => {
+            if (canFulfillOrder(order)) {
+                fulfillOrder(order.id);
+            }
+        });
+    }
+
+    function updateOrderCountdowns(deltaTime) {
+        gameState.orders.forEach(order => {
+            order.countdown -= deltaTime / 1000;
+        });
+        // Update countdown bars/text live without full re-render
+        gameState.orders.forEach(order => {
+            const prog = document.getElementById(`order-progress-${order.id}`);
+            if (prog) {
+                const pct = Math.max(0, order.countdown) / 30 * 100;
+                prog.style.width = pct + '%';
+            }
+            const txt = document.getElementById(`order-countdown-text-${order.id}`);
+            if (txt) {
+                txt.textContent = `${Math.ceil(Math.max(0, order.countdown))}s left`;
+            }
+        });
+        // Remove orders where countdown <= 0
+        const leavingOrders = gameState.orders.filter(order => order.countdown <= 0);
+        if (leavingOrders.length > 0) {
+            leavingOrders.forEach(order => {
+                showNotification(`${order.customer} left!`, '#ef4444');
+            });
+            gameState.orders = gameState.orders.filter(order => order.countdown > 0);
+            renderOrders();
+        }
+    }
 
 // ===========================
 // Click System
@@ -340,10 +417,43 @@ function showNotification(message, color = '#667eea') {
 }
 
 function selectPillType(type) {
+    if (gameState.currentPillType === type) return; // Already selected
+    
     gameState.currentPillType = type;
     document.getElementById('currentPillName').textContent = pillTypes[type].name;
     document.getElementById('clickerIcon').textContent = pillTypes[type].icon;
-    renderPillButtons();
+    
+    // Update button states using data attributes (no full re-render)
+    document.querySelectorAll('.pill-select-button').forEach(button => {
+        const btnType = button.getAttribute('data-pill-type');
+        if (btnType === type) {
+            button.classList.add('active');
+        } else {
+            button.classList.remove('active');
+        }
+    });
+}
+
+function renderPillButtons() {
+    const container = document.getElementById('pillButtons');
+    
+    container.innerHTML = Object.entries(pillTypes).map(([type, pill]) => `
+        <button class="pill-select-button ${gameState.currentPillType === type ? 'active' : ''}" 
+                data-pill-type="${type}">
+            <div class="pill-button-icon">${pill.icon}</div>
+            <div class="pill-button-name">${pill.name}</div>
+            <div class="pill-button-count">${Math.floor(gameState.inventory[type])}</div>
+        </button>
+    `).join('');
+
+    // Attach click listeners to make switching immediate
+    container.querySelectorAll('.pill-select-button').forEach(btn => {
+        btn.removeEventListener && btn.removeEventListener('click', () => {});
+        btn.addEventListener('click', () => {
+            const t = btn.getAttribute('data-pill-type');
+            if (t) selectPillType(t);
+        });
+    });
 }
 
 // ===========================
@@ -370,6 +480,8 @@ function purchaseUpgrade(upgradeId) {
     
     updateDisplay();
     renderUpgrades();
+    // Re-render orders so any new UI (like auto-fulfillment toggle) appears immediately
+    renderOrders();
 }
 
 // ===========================
@@ -394,14 +506,9 @@ function autoProducePills(deltaTime) {
     if (pillsPerSecond === 0) return;
     
     const pillsToAdd = (pillsPerSecond * deltaTime) / 1000;
-    
-    // Distribute evenly among all pill types
-    const types = Object.keys(pillTypes);
-    const perType = pillsToAdd / types.length;
-    
-    types.forEach(type => {
-        gameState.inventory[type] += perType;
-    });
+    // Add produced pills to the currently selected pill type (more intuitive)
+    const selected = gameState.currentPillType || Object.keys(pillTypes)[0];
+    gameState.inventory[selected] += pillsToAdd;
     
     gameState.totalProduced += pillsToAdd;
 }
@@ -436,12 +543,20 @@ function renderPillButtons() {
     
     container.innerHTML = Object.entries(pillTypes).map(([type, pill]) => `
         <button class="pill-select-button ${gameState.currentPillType === type ? 'active' : ''}" 
-                onclick="selectPillType('${type}')">
+                data-pill-type="${type}">
             <div class="pill-button-icon">${pill.icon}</div>
             <div class="pill-button-name">${pill.name}</div>
             <div class="pill-button-count">${Math.floor(gameState.inventory[type])}</div>
         </button>
     `).join('');
+
+    // Attach fast click handlers to buttons to ensure immediate responsiveness
+    container.querySelectorAll('.pill-select-button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const t = btn.getAttribute('data-pill-type');
+            if (t) selectPillType(t);
+        });
+    });
 }
 
 function renderOrders() {
@@ -450,19 +565,23 @@ function renderOrders() {
         console.error('Orders container not found!');
         return;
     }
-    
+    let autoToggleHtml = '';
+    if (gameState.autoEmployee) {
+        const btnClass = gameState.autoEmployeeEnabled ? 'auto-toggle-button enabled' : 'auto-toggle-button';
+        const btnLabel = gameState.autoEmployeeEnabled ? 'Disable Auto-Fulfillment' : 'Enable Auto-Fulfillment';
+        autoToggleHtml = `<button id="autoEmployeeToggle" class="${btnClass}">${btnLabel}</button>`;
+    }
     try {
         if (gameState.orders.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No orders yet. Keep producing pills!</p>';
+            container.innerHTML = autoToggleHtml + '<p style="text-align: center; color: #666; padding: 2rem;">No orders yet. Keep producing pills!</p>';
             return;
         }
-        
-        container.innerHTML = gameState.orders.map(order => {
+        container.innerHTML = autoToggleHtml + gameState.orders.map(order => {
             const canFulfill = canFulfillOrder(order);
-            
+            const countdownPercent = Math.max(0, order.countdown) / 30 * 100;
             return `
                 <div class="order-card ${!canFulfill ? 'disabled' : ''}" 
-                     onclick="${canFulfill ? `fulfillOrder(${order.id})` : ''}">
+                     onclick="${canFulfill ? `fulfillOrder(${order.id})` : ''}" data-order-id="${order.id}">
                     <div class="order-header">
                         <span class="order-customer">👤 ${order.customer}</span>
                         <span class="order-tier ${order.tier}">${customerTiers[order.tier].name}</span>
@@ -484,6 +603,10 @@ function renderOrders() {
                     <div class="order-footer">
                         <span class="order-reward">💰 $${order.payment}</span>
                         ${canFulfill ? '<span class="order-button">Fulfill</span>' : '<span style="color: #ef4444; font-weight: 600;">Need more pills</span>'}
+                        <div class="order-countdown-bar" style="height:6px;background:#eee;margin-top:6px;position:relative;width:100%;border-radius:3px;">
+                            <div id="order-progress-${order.id}" style="height:100%;background:#3b82f6;width:${countdownPercent}%;transition:width 0.2s;border-radius:3px;"></div>
+                        </div>
+                        <span id="order-countdown-text-${order.id}" style="font-size:12px;color:#666;">${Math.ceil(order.countdown)}s left</span>
                     </div>
                 </div>
             `;
@@ -492,6 +615,7 @@ function renderOrders() {
         console.error('Error rendering orders:', e);
         container.innerHTML = '<p style="color: red; padding: 1rem;">Error loading orders</p>';
     }
+    // Event handler hookup is done once during initialization via event delegation
 }
 
 function renderUpgrades() {
@@ -504,14 +628,9 @@ function renderUpgrades() {
     try {
         container.innerHTML = upgradeDefinitions.map(def => {
             const upgrade = gameState.upgrades[def.id];
-            if (!upgrade) {
-                console.warn(`Upgrade ${def.id} not initialized`);
-                return '';
-            }
-            
+            if (!upgrade) return '';
             const canAfford = gameState.money >= upgrade.cost;
             const isPurchased = def.oneTime && upgrade.level > 0;
-            
             return `
                 <div class="upgrade-card ${!canAfford || isPurchased ? 'disabled' : ''}" 
                      onclick="${!isPurchased ? `purchaseUpgrade('${def.id}')` : ''}">
@@ -603,9 +722,22 @@ function loadGame() {
                 }
             });
             
-            // Add offline production (capped at 1 hour)
+            // Calculate offline production and earnings (capped at 1 hour)
             if (offlineTime > 0 && offlineTime < 3600000) {
-                autoProducePills(Math.min(offlineTime, 3600000));
+                const cappedOfflineTime = Math.min(offlineTime, 3600000);
+                
+                // Pills produced while offline (normal calculation)
+                autoProducePills(cappedOfflineTime);
+                
+                // Earnings while offline (100x less than if you were clicking)
+                // Estimate: only auto-clickers generate revenue, at 1/100th efficiency
+                const pillsPerSecond = calculateAutoProduction();
+                const offlineSeconds = cappedOfflineTime / 1000;
+                const offlineMoneyPerSecond = (pillsPerSecond * 0.5) / 100; // 100x less
+                const offlineEarnings = offlineMoneyPerSecond * offlineSeconds;
+                gameState.money += offlineEarnings;
+                
+                console.log(`Offline for ${(offlineTime / 60000).toFixed(1)} minutes. Earned: $${offlineEarnings.toFixed(2)}`);
             }
             
             console.log('Game loaded from save');
@@ -628,6 +760,19 @@ let lastUpdate = Date.now();
 let renderCounter = 0;
 let lastOrderCount = 0;
 let lastUpgradeState = {};
+let orderGenerationTimer = null;
+
+function scheduleOrderGeneration() {
+    if (orderGenerationTimer) clearTimeout(orderGenerationTimer);
+    orderGenerationTimer = setTimeout(() => {
+        if (gameState.orders.length < 6) {
+            generateOrder();
+            renderOrders();
+        }
+        // schedule next using current interval (allows upgrades to change it)
+        scheduleOrderGeneration();
+    }, gameState.orderSpawnInterval);
+}
 
 function gameLoop() {
     const now = Date.now();
@@ -636,6 +781,9 @@ function gameLoop() {
     
     // Auto-produce pills
     autoProducePills(deltaTime);
+    // Auto-fulfill orders and update countdowns frequently
+    autoFulfillOrders();
+    updateOrderCountdowns(deltaTime);
     
     updateDisplay();
     updateGameTime();
@@ -677,6 +825,19 @@ function init() {
     
     // Event listeners
     document.getElementById('clickerButton').addEventListener('click', handleClick);
+    // Delegate auto-fulfillment toggle clicks so the button works immediately without relying on a re-render hookup
+    const ordersContainer = document.getElementById('ordersContainer');
+    if (ordersContainer) {
+        ordersContainer.addEventListener('click', (e) => {
+            const btn = e.target.closest && e.target.closest('#autoEmployeeToggle');
+            if (btn) {
+                gameState.autoEmployeeEnabled = !gameState.autoEmployeeEnabled;
+                btn.textContent = gameState.autoEmployeeEnabled ? 'Disable Auto-Fulfillment' : 'Enable Auto-Fulfillment';
+                if (gameState.autoEmployeeEnabled) btn.classList.add('enabled'); else btn.classList.remove('enabled');
+                renderOrders();
+            }
+        });
+    }
     
     // Initial render
     console.log('Rendering pill buttons...');
@@ -701,13 +862,8 @@ function init() {
     // Game loop - 10 times per second for smooth updates
     setInterval(gameLoop, 100);
     
-    // Generate new orders periodically
-    setInterval(() => {
-        if (gameState.orders.length < 6) {
-            generateOrder();
-            renderOrders();
-        }
-    }, 8000);
+    // Generate new orders periodically (uses schedule so upgrades can change interval)
+    scheduleOrderGeneration();
     
     // Auto-save every 15 seconds
     setInterval(saveGame, 15000);
