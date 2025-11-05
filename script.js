@@ -1,715 +1,723 @@
-// ==================== GAME STATE ====================
+// ===========================
+// Game State
+// ===========================
 const gameState = {
-    // Currency
-    dayMoney: 0,
-    nightMoney: 0,
-    totalEarned: 0,
-    
-    // Time system (24 hours = 1 real hour, so each game hour = 150 seconds)
-    gameTime: 6 * 60, // Start at 6 AM (in minutes)
-    dayCount: 1,
-    isNightMode: false,
-    
-    // Click mechanics
-    clickValue: 1,
-    perSecond: 0,
-    
-    // Upgrades
-    dayUpgrades: [],
-    nightUpgrades: [],
-    
-    // Inventory (for night mode)
+    money: 0,
+    moneyPerSecond: 0,
+    totalProduced: 0,
+    currentPillType: 'aspirin',
+    pillsPerClick: 1,
+    startTime: Date.now(),
+    gameMinutes: 0,
     inventory: {},
-    
-    // Market prices (regenerated each night)
-    marketPrices: {},
-    
-    // Statistics
-    totalClicks: 0,
-    lastSaveTime: Date.now()
+    orders: [],
+    nextOrderId: 1,
+    customerTier: 'bronze',
+    upgrades: {},
+    autoProducers: {}
 };
 
-// ==================== GAME DATA ====================
+// ===========================
+// Pill Type Definitions
+// ===========================
+const pillTypes = {
+    aspirin: { name: 'Aspirin', icon: '💊', color: '#667eea', baseValue: 1 },
+    ibuprofen: { name: 'Ibuprofen', icon: '🔴', color: '#ef4444', baseValue: 2 },
+    vitamins: { name: 'Vitamins', icon: '🟡', color: '#f59e0b', baseValue: 3 },
+    antibiotics: { name: 'Antibiotics', icon: '🟢', color: '#10b981', baseValue: 5 },
+    supplements: { name: 'Supplements', icon: '🟣', color: '#8b5cf6', baseValue: 4 },
+    painRelief: { name: 'Pain Relief', icon: '🔵', color: '#3b82f6', baseValue: 3 }
+};
 
-// Day Mode Upgrades
-const DAY_UPGRADES = [
+// Initialize inventory
+Object.keys(pillTypes).forEach(type => {
+    gameState.inventory[type] = 0;
+});
+
+// ===========================
+// Upgrade Definitions (Rebalanced)
+// ===========================
+const upgradeDefinitions = [
+    {
+        id: 'clickPower1',
+        name: '💪 Better Production',
+        description: 'Produce +1 pill per click',
+        baseCost: 50,
+        costMultiplier: 1.15,
+        benefit: '+1 per click',
+        effect: () => gameState.pillsPerClick += 1,
+        type: 'click'
+    },
+    {
+        id: 'clickPower2',
+        name: '⚡ Advanced Production',
+        description: 'Produce +2 pills per click',
+        baseCost: 250,
+        costMultiplier: 1.18,
+        benefit: '+2 per click',
+        effect: () => gameState.pillsPerClick += 2,
+        type: 'click'
+    },
+    {
+        id: 'clickPower3',
+        name: '🏭 Industrial Production',
+        description: 'Produce +5 pills per click',
+        baseCost: 1000,
+        costMultiplier: 1.2,
+        benefit: '+5 per click',
+        effect: () => gameState.pillsPerClick += 5,
+        type: 'click'
+    },
+    {
+        id: 'intern',
+        name: '👤 Pharmacy Intern',
+        description: 'Produces 1 pill every 2 seconds',
+        baseCost: 100,
+        costMultiplier: 1.12,
+        benefit: '0.5 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.intern) gameState.autoProducers.intern = 0;
+            gameState.autoProducers.intern += 1;
+        },
+        type: 'auto'
+    },
     {
         id: 'assistant',
-        name: '💼 Pharmacy Assistant',
-        baseCost: 100,
-        description: 'Helps serve customers automatically',
-        baseProduction: 1,
-        owned: 0
-    },
-    {
-        id: 'equipment',
-        name: '⚗️ Better Equipment',
+        name: '👨‍⚕️ Pharmacy Assistant',
+        description: 'Produces 1 pill per second',
         baseCost: 500,
-        description: 'Doubles your click value',
-        multiplier: 2,
-        owned: 0
+        costMultiplier: 1.14,
+        benefit: '1 pill/sec',
+        effect: () => {
+            if (!gameState.autoProducers.assistant) gameState.autoProducers.assistant = 0;
+            gameState.autoProducers.assistant += 1;
+        },
+        type: 'auto'
     },
     {
-        id: 'loyalty',
-        name: '💳 Loyalty Card System',
-        baseCost: 1000,
-        description: 'Regular customers provide steady income',
-        baseProduction: 5,
-        owned: 0
+        id: 'pharmacist',
+        name: '� Licensed Pharmacist',
+        description: 'Produces 3 pills per second',
+        baseCost: 2500,
+        costMultiplier: 1.15,
+        benefit: '3 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.pharmacist) gameState.autoProducers.pharmacist = 0;
+            gameState.autoProducers.pharmacist += 1;
+        },
+        type: 'auto'
     },
     {
-        id: 'insurance',
-        name: '🏥 Premium Insurance',
-        baseCost: 5000,
-        description: 'Triples passive income',
-        multiplier: 3,
-        owned: 0
-    },
-    {
-        id: 'advertising',
-        name: '📺 TV Advertising',
-        baseCost: 15000,
-        description: 'Attracts more customers',
-        baseProduction: 25,
-        owned: 0
-    },
-    {
-        id: 'chain',
-        name: '🏢 Chain Expansion',
-        baseCost: 50000,
-        description: 'Open multiple locations',
-        baseProduction: 100,
-        owned: 0
-    }
-];
-
-// Night Mode Upgrades
-const NIGHT_UPGRADES = [
-    {
-        id: 'contacts',
-        name: '📱 Secret Contacts',
-        baseCost: 500,
-        description: 'Unlock market intel and better prices',
-        owned: 0
-    },
-    {
-        id: 'encryption',
-        name: '🔐 Encryption Software',
-        baseCost: 2000,
-        description: 'Unlock 2 more products',
-        owned: 0
-    },
-    {
-        id: 'distribution',
-        name: '🚚 Distribution Network',
+        id: 'seniorPharmacist',
+        name: '👔 Senior Pharmacist',
+        description: 'Produces 8 pills per second',
         baseCost: 10000,
-        description: 'Sell in bulk for 50% bonus',
-        multiplier: 1.5,
-        owned: 0
+        costMultiplier: 1.16,
+        benefit: '8 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.seniorPharmacist) gameState.autoProducers.seniorPharmacist = 0;
+            gameState.autoProducers.seniorPharmacist += 1;
+        },
+        type: 'auto'
     },
     {
-        id: 'lab',
-        name: '🧪 Underground Lab',
-        baseCost: 25000,
-        description: 'Produce your own inventory',
-        baseProduction: 10,
-        owned: 0
+        id: 'manager',
+        name: '🎓 Pharmacy Manager',
+        description: 'Produces 20 pills per second',
+        baseCost: 50000,
+        costMultiplier: 1.17,
+        benefit: '20 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.manager) gameState.autoProducers.manager = 0;
+            gameState.autoProducers.manager += 1;
+        },
+        type: 'auto'
+    },
+    {
+        id: 'automation1',
+        name: '🤖 Pill Counter Machine',
+        description: 'Produces 50 pills per second',
+        baseCost: 250000,
+        costMultiplier: 1.18,
+        benefit: '50 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.automation1) gameState.autoProducers.automation1 = 0;
+            gameState.autoProducers.automation1 += 1;
+        },
+        type: 'auto'
+    },
+    {
+        id: 'automation2',
+        name: '🏭 Automated Assembly Line',
+        description: 'Produces 150 pills per second',
+        baseCost: 1000000,
+        costMultiplier: 1.19,
+        benefit: '150 pills/sec',
+        effect: () => {
+            if (!gameState.autoProducers.automation2) gameState.autoProducers.automation2 = 0;
+            gameState.autoProducers.automation2 += 1;
+        },
+        type: 'auto'
+    },
+    {
+        id: 'reputation1',
+        name: '⭐ Local Advertising',
+        description: 'Attract Silver tier customers',
+        baseCost: 5000,
+        costMultiplier: 3,
+        benefit: 'Better customers',
+        effect: () => {
+            if (gameState.customerTier === 'bronze') gameState.customerTier = 'silver';
+        },
+        type: 'reputation',
+        oneTime: true
+    },
+    {
+        id: 'reputation2',
+        name: '⭐⭐ Regional Campaign',
+        description: 'Attract Gold tier customers',
+        baseCost: 50000,
+        costMultiplier: 3,
+        benefit: 'Premium customers',
+        effect: () => {
+            if (gameState.customerTier === 'silver') gameState.customerTier = 'gold';
+        },
+        type: 'reputation',
+        oneTime: true
+    },
+    {
+        id: 'reputation3',
+        name: '⭐⭐⭐ National Marketing',
+        description: 'Attract Platinum tier customers',
+        baseCost: 500000,
+        costMultiplier: 3,
+        benefit: 'Elite customers',
+        effect: () => {
+            if (gameState.customerTier === 'gold') gameState.customerTier = 'platinum';
+        },
+        type: 'reputation',
+        oneTime: true
     }
 ];
 
-// Black Market Products (Educational Satire - All Fictional)
-const MARKET_PRODUCTS = [
-    { id: 'giggle', name: '😂 Giggle Dust', icon: '✨', basePrice: 10 },
-    { id: 'zoom', name: '⚡ Zoom Zoom Pills', icon: '💊', basePrice: 15 },
-    { id: 'chill', name: '😌 Chill-axative', icon: '🍃', basePrice: 12 },
-    { id: 'brain', name: '🧠 Brain Sprinkles', icon: '🌟', basePrice: 20 },
-    { id: 'rainbow', name: '🌈 Rainbow Puffs', icon: '☁️', basePrice: 18 },
-    { id: 'snooze', name: '😴 Snooze Snacks', icon: '🌙', basePrice: 8 },
-    { id: 'focus', name: '🎯 Focus Fizz', icon: '💫', basePrice: 25 } // Unlocked later
-];
+// Initialize upgrades
+upgradeDefinitions.forEach(def => {
+    gameState.upgrades[def.id] = {
+        level: 0,
+        cost: def.baseCost
+    };
+});
 
-// ==================== INITIALIZATION ====================
-
-// Initialize upgrades with owned count
-DAY_UPGRADES.forEach(upgrade => gameState.dayUpgrades.push({...upgrade}));
-NIGHT_UPGRADES.forEach(upgrade => gameState.nightUpgrades.push({...upgrade}));
-MARKET_PRODUCTS.forEach(product => gameState.inventory[product.id] = 0);
-
-// ==================== DOM ELEMENTS ====================
-const elements = {
-    gameTitle: document.getElementById('game-title'),
-    gameTime: document.getElementById('game-time'),
-    dayCounter: document.getElementById('day-counter'),
-    timeProgress: document.getElementById('time-progress'),
-    
-    dayMoney: document.getElementById('day-money'),
-    nightMoney: document.getElementById('night-money'),
-    totalMoney: document.getElementById('total-money'),
-    
-    clickValue: document.getElementById('click-value'),
-    perSecond: document.getElementById('per-second'),
-    totalEarned: document.getElementById('total-earned'),
-    
-    clickButton: document.getElementById('click-button'),
-    clickText: document.getElementById('click-text'),
-    clickIcon: document.getElementById('click-icon'),
-    clickFeedback: document.getElementById('click-feedback'),
-    
-    dayUpgradeList: document.getElementById('day-upgrade-list'),
-    nightUpgradeList: document.getElementById('night-upgrade-list'),
-    dayUpgradesGroup: document.getElementById('day-upgrades'),
-    nightUpgradesGroup: document.getElementById('night-upgrades'),
-    
-    marketPanel: document.getElementById('market-panel'),
-    marketList: document.getElementById('market-list'),
-    
-    inventoryPanel: document.getElementById('inventory-panel'),
-    inventoryList: document.getElementById('inventory-list'),
-    
-    saveButton: document.getElementById('save-button'),
-    resetButton: document.getElementById('reset-button'),
-    saveIndicator: document.getElementById('save-indicator')
+// ===========================
+// Customer Tier System
+// ===========================
+const customerTiers = {
+    bronze: { name: 'Bronze', payMultiplier: 1, color: '#cd7f32' },
+    silver: { name: 'Silver', payMultiplier: 1.5, color: '#c0c0c0' },
+    gold: { name: 'Gold', payMultiplier: 2.5, color: '#ffd700' },
+    platinum: { name: 'Platinum', payMultiplier: 5, color: '#e5e4e2' }
 };
 
-// ==================== UTILITY FUNCTIONS ====================
+// ===========================
+// Order System
+// ===========================
+const customerNames = [
+    'John Smith', 'Emma Johnson', 'Michael Brown', 'Sarah Davis',
+    'James Wilson', 'Emily Taylor', 'Robert Anderson', 'Jessica Martinez',
+    'David Thomas', 'Ashley Garcia', 'Christopher Lee', 'Amanda White',
+    'Daniel Harris', 'Melissa Clark', 'Matthew Lewis', 'Jennifer Walker',
+    'William Moore', 'Olivia Martin', 'Joseph Jackson', 'Sophia Thompson'
+];
+
+function generateOrder() {
+    const tier = customerTiers[gameState.customerTier];
+    const numItems = Math.min(1 + Math.floor(Math.random() * 3), 3); // 1-3 items
+    const items = [];
+    
+    // Select random pill types for this order
+    const availablePillTypes = Object.keys(pillTypes);
+    for (let i = 0; i < numItems; i++) {
+        const pillType = availablePillTypes[Math.floor(Math.random() * availablePillTypes.length)];
+        const quantity = Math.ceil(1 + Math.random() * 9); // 1-10 pills
+        items.push({ type: pillType, quantity });
+    }
+    
+    // Calculate total payment based on items and tier
+    const basePayment = items.reduce((sum, item) => {
+        return sum + (pillTypes[item.type].baseValue * item.quantity);
+    }, 0);
+    
+    const payment = Math.floor(basePayment * tier.payMultiplier * (0.8 + Math.random() * 0.4));
+    
+    const order = {
+        id: gameState.nextOrderId++,
+        customer: customerNames[Math.floor(Math.random() * customerNames.length)],
+        items: items,
+        payment: payment,
+        tier: gameState.customerTier
+    };
+    
+    gameState.orders.push(order);
+    renderOrders();
+}
+
+function canFulfillOrder(order) {
+    return order.items.every(item => gameState.inventory[item.type] >= item.quantity);
+}
+
+function fulfillOrder(orderId) {
+    const order = gameState.orders.find(o => o.id === orderId);
+    if (!order || !canFulfillOrder(order)) return;
+    
+    // Deduct pills from inventory
+    order.items.forEach(item => {
+        gameState.inventory[item.type] -= item.quantity;
+    });
+    
+    // Add money
+    gameState.money += order.payment;
+    
+    // Remove order
+    gameState.orders = gameState.orders.filter(o => o.id !== orderId);
+    
+    // Show success notification
+    showNotification(`+$${order.payment}`, '#10b981');
+    
+    renderPillButtons();
+    updateDisplay();
+    renderOrders();
+}
+
+// ===========================
+// Click System
+// ===========================
+function handleClick(event) {
+    const button = document.getElementById('clickerButton');
+    
+    // Add pills to inventory
+    gameState.inventory[gameState.currentPillType] += gameState.pillsPerClick;
+    gameState.totalProduced += gameState.pillsPerClick;
+    
+    // Visual feedback
+    button.classList.add('clicking');
+    setTimeout(() => button.classList.remove('clicking'), 200);
+    
+    // Show floating number at cursor position
+    showClickEffect(event, gameState.pillsPerClick);
+    
+    updateDisplay();
+    renderPillButtons();
+}
+
+function showClickEffect(event, value) {
+    const effect = document.createElement('div');
+    effect.className = 'click-effect';
+    const pill = pillTypes[gameState.currentPillType];
+    effect.textContent = `+${value} ${pill.icon}`;
+    effect.style.color = pill.color;
+    
+    // Position at exact cursor location
+    effect.style.left = event.clientX + 'px';
+    effect.style.top = event.clientY + 'px';
+    
+    document.getElementById('clickEffects').appendChild(effect);
+    
+    setTimeout(() => effect.remove(), 1200);
+}
+
+function showNotification(message, color = '#667eea') {
+    const effect = document.createElement('div');
+    effect.className = 'click-effect';
+    effect.textContent = message;
+    effect.style.left = '50%';
+    effect.style.top = '20%';
+    effect.style.fontSize = '2.5rem';
+    effect.style.color = color;
+    effect.style.transform = 'translateX(-50%)';
+    
+    document.getElementById('clickEffects').appendChild(effect);
+    setTimeout(() => effect.remove(), 1500);
+}
+
+function selectPillType(type) {
+    gameState.currentPillType = type;
+    document.getElementById('currentPillName').textContent = pillTypes[type].name;
+    document.getElementById('clickerIcon').textContent = pillTypes[type].icon;
+    renderPillButtons();
+}
+
+// ===========================
+// Upgrade System
+// ===========================
+function purchaseUpgrade(upgradeId) {
+    const upgrade = gameState.upgrades[upgradeId];
+    const def = upgradeDefinitions.find(u => u.id === upgradeId);
+    
+    if (!upgrade || !def || gameState.money < upgrade.cost) return;
+    
+    // Check if one-time upgrade already purchased
+    if (def.oneTime && upgrade.level > 0) return;
+    
+    gameState.money -= upgrade.cost;
+    upgrade.level++;
+    
+    if (!def.oneTime) {
+        upgrade.cost = Math.floor(def.baseCost * Math.pow(def.costMultiplier, upgrade.level));
+    }
+    
+    // Apply effect
+    def.effect();
+    
+    updateDisplay();
+    renderUpgrades();
+}
+
+// ===========================
+// Auto Production System
+// ===========================
+function calculateAutoProduction() {
+    let pillsPerSecond = 0;
+    
+    if (gameState.autoProducers.intern) pillsPerSecond += gameState.autoProducers.intern * 0.5;
+    if (gameState.autoProducers.assistant) pillsPerSecond += gameState.autoProducers.assistant * 1;
+    if (gameState.autoProducers.pharmacist) pillsPerSecond += gameState.autoProducers.pharmacist * 3;
+    if (gameState.autoProducers.seniorPharmacist) pillsPerSecond += gameState.autoProducers.seniorPharmacist * 8;
+    if (gameState.autoProducers.manager) pillsPerSecond += gameState.autoProducers.manager * 20;
+    if (gameState.autoProducers.automation1) pillsPerSecond += gameState.autoProducers.automation1 * 50;
+    if (gameState.autoProducers.automation2) pillsPerSecond += gameState.autoProducers.automation2 * 150;
+    
+    return pillsPerSecond;
+}
+
+function autoProducePills(deltaTime) {
+    const pillsPerSecond = calculateAutoProduction();
+    if (pillsPerSecond === 0) return;
+    
+    const pillsToAdd = (pillsPerSecond * deltaTime) / 1000;
+    
+    // Distribute evenly among all pill types
+    const types = Object.keys(pillTypes);
+    const perType = pillsToAdd / types.length;
+    
+    types.forEach(type => {
+        gameState.inventory[type] += perType;
+    });
+    
+    gameState.totalProduced += pillsToAdd;
+}
+
+// ===========================
+// Time System
+// ===========================
+function updateGameTime() {
+    // 1 real minute = 60 game minutes (1 hour)
+    const realSecondsElapsed = (Date.now() - gameState.startTime) / 1000;
+    gameState.gameMinutes = Math.floor(realSecondsElapsed);
+    
+    const totalGameMinutes = gameState.gameMinutes;
+    const hours = (Math.floor(totalGameMinutes / 60) % 24) + 8; // Start at 8 AM
+    const minutes = totalGameMinutes % 60;
+    const days = Math.floor((totalGameMinutes + 480) / (60 * 24)) + 1; // Offset for 8 AM start
+    
+    // Format time
+    const displayHours = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
+    const period = hours >= 12 ? 'PM' : 'AM';
+    const timeString = `${displayHours}:${minutes.toString().padStart(2, '0')} ${period}`;
+    
+    document.getElementById('gameTime').textContent = timeString;
+    document.getElementById('gameDay').textContent = days;
+}
+
+// ===========================
+// Render Functions
+// ===========================
+function renderPillButtons() {
+    const container = document.getElementById('pillButtons');
+    
+    container.innerHTML = Object.entries(pillTypes).map(([type, pill]) => `
+        <button class="pill-select-button ${gameState.currentPillType === type ? 'active' : ''}" 
+                onclick="selectPillType('${type}')">
+            <div class="pill-button-icon">${pill.icon}</div>
+            <div class="pill-button-name">${pill.name}</div>
+            <div class="pill-button-count">${Math.floor(gameState.inventory[type])}</div>
+        </button>
+    `).join('');
+}
+
+function renderOrders() {
+    const container = document.getElementById('ordersContainer');
+    if (!container) {
+        console.error('Orders container not found!');
+        return;
+    }
+    
+    try {
+        if (gameState.orders.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: #666; padding: 2rem;">No orders yet. Keep producing pills!</p>';
+            return;
+        }
+        
+        container.innerHTML = gameState.orders.map(order => {
+            const canFulfill = canFulfillOrder(order);
+            
+            return `
+                <div class="order-card ${!canFulfill ? 'disabled' : ''}" 
+                     onclick="${canFulfill ? `fulfillOrder(${order.id})` : ''}">
+                    <div class="order-header">
+                        <span class="order-customer">👤 ${order.customer}</span>
+                        <span class="order-tier ${order.tier}">${customerTiers[order.tier].name}</span>
+                    </div>
+                    <div class="order-items">
+                        ${order.items.map(item => {
+                            const pill = pillTypes[item.type];
+                            const hasEnough = gameState.inventory[item.type] >= item.quantity;
+                            return `
+                                <div class="order-item">
+                                    <span class="order-item-name">${pill.icon} ${pill.name}</span>
+                                    <span class="order-item-quantity" style="color: ${hasEnough ? '#10b981' : '#ef4444'}">
+                                        ${Math.floor(gameState.inventory[item.type])}/${item.quantity}
+                                    </span>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                    <div class="order-footer">
+                        <span class="order-reward">💰 $${order.payment}</span>
+                        ${canFulfill ? '<span class="order-button">Fulfill</span>' : '<span style="color: #ef4444; font-weight: 600;">Need more pills</span>'}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('Error rendering orders:', e);
+        container.innerHTML = '<p style="color: red; padding: 1rem;">Error loading orders</p>';
+    }
+}
+
+function renderUpgrades() {
+    const container = document.getElementById('upgradesContainer');
+    if (!container) {
+        console.error('Upgrades container not found!');
+        return;
+    }
+    
+    try {
+        container.innerHTML = upgradeDefinitions.map(def => {
+            const upgrade = gameState.upgrades[def.id];
+            if (!upgrade) {
+                console.warn(`Upgrade ${def.id} not initialized`);
+                return '';
+            }
+            
+            const canAfford = gameState.money >= upgrade.cost;
+            const isPurchased = def.oneTime && upgrade.level > 0;
+            
+            return `
+                <div class="upgrade-card ${!canAfford || isPurchased ? 'disabled' : ''}" 
+                     onclick="${!isPurchased ? `purchaseUpgrade('${def.id}')` : ''}">
+                    <div class="upgrade-header">
+                        <span class="upgrade-name">${def.name}</span>
+                        <span class="upgrade-level">${isPurchased ? '✓' : `Lv ${upgrade.level}`}</span>
+                    </div>
+                    <div class="upgrade-description">${def.description}</div>
+                    <div class="upgrade-footer">
+                        <span class="upgrade-cost">${isPurchased ? 'PURCHASED' : `$${upgrade.cost.toLocaleString()}`}</span>
+                        <span class="upgrade-benefit">${def.benefit}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error('Error rendering upgrades:', e);
+        container.innerHTML = '<p style="color: red; padding: 1rem;">Error loading upgrades</p>';
+    }
+}
 
 function formatMoney(amount) {
     if (amount >= 1000000) {
         return '$' + (amount / 1000000).toFixed(2) + 'M';
     } else if (amount >= 1000) {
-        return '$' + (amount / 1000).toFixed(1) + 'K';
+        return '$' + (amount / 1000).toFixed(2) + 'K';
     }
-    return '$' + Math.floor(amount);
+    return '$' + Math.floor(amount).toLocaleString();
 }
-
-function formatTime(minutes) {
-    const hours = Math.floor(minutes / 60) % 24;
-    const mins = Math.floor(minutes % 60);
-    const period = hours >= 12 ? 'PM' : 'AM';
-    const displayHour = hours % 12 || 12;
-    return `${displayHour}:${mins.toString().padStart(2, '0')} ${period}`;
-}
-
-function calculateUpgradeCost(upgrade) {
-    return Math.floor(upgrade.baseCost * Math.pow(1.15, upgrade.owned));
-}
-
-function getTotalMoney() {
-    return gameState.dayMoney + gameState.nightMoney;
-}
-
-function canAfford(cost, useNightMoney = false) {
-    if (useNightMoney) {
-        return gameState.nightMoney >= cost;
-    }
-    return gameState.dayMoney >= cost;
-}
-
-function spendMoney(cost, useNightMoney = false) {
-    if (useNightMoney) {
-        gameState.nightMoney -= cost;
-    } else {
-        gameState.dayMoney -= cost;
-    }
-    updateDisplay();
-}
-
-// ==================== CLICK MECHANICS ====================
-
-function handleClick(event) {
-    const earned = gameState.clickValue;
-    
-    if (gameState.isNightMode) {
-        // In night mode, clicking produces inventory items randomly
-        const availableProducts = getAvailableProducts();
-        const randomProduct = availableProducts[Math.floor(Math.random() * availableProducts.length)];
-        gameState.inventory[randomProduct.id] += 1;
-        showClickFeedback(randomProduct.icon, event);
-        updateInventoryDisplay();
-    } else {
-        // In day mode, clicking earns money
-        gameState.dayMoney += earned;
-        gameState.totalEarned += earned;
-        showClickFeedback('+' + formatMoney(earned), event);
-    }
-    
-    gameState.totalClicks++;
-    updateDisplay();
-    
-    // Particle effect
-    createParticle(event.clientX, event.clientY);
-}
-
-function showClickFeedback(text, event) {
-    const popup = document.createElement('div');
-    popup.className = 'click-popup';
-    popup.textContent = text;
-    
-    const rect = elements.clickButton.getBoundingClientRect();
-    popup.style.left = (event.clientX - rect.left) + 'px';
-    popup.style.top = (event.clientY - rect.top) + 'px';
-    
-    elements.clickFeedback.appendChild(popup);
-    
-    setTimeout(() => popup.remove(), 1000);
-}
-
-function createParticle(x, y) {
-    const particle = document.createElement('div');
-    particle.className = 'particle';
-    particle.textContent = gameState.isNightMode ? '💸' : '💊';
-    particle.style.left = x + 'px';
-    particle.style.top = y + 'px';
-    particle.style.fontSize = (Math.random() * 20 + 20) + 'px';
-    
-    document.getElementById('particles-container').appendChild(particle);
-    
-    setTimeout(() => particle.remove(), 2000);
-}
-
-// ==================== PASSIVE INCOME ====================
-
-function calculatePerSecond() {
-    let total = 0;
-    
-    gameState.dayUpgrades.forEach(upgrade => {
-        if (upgrade.baseProduction && upgrade.owned > 0) {
-            total += upgrade.baseProduction * upgrade.owned;
-        }
-    });
-    
-    // Apply multipliers
-    gameState.dayUpgrades.forEach(upgrade => {
-        if (upgrade.multiplier && upgrade.owned > 0) {
-            total *= upgrade.multiplier;
-        }
-    });
-    
-    return total;
-}
-
-function applyPassiveIncome() {
-    if (!gameState.isNightMode) {
-        const income = gameState.perSecond;
-        gameState.dayMoney += income;
-        gameState.totalEarned += income;
-        updateDisplay();
-    } else {
-        // In night mode, lab produces inventory
-        const labUpgrade = gameState.nightUpgrades.find(u => u.id === 'lab');
-        if (labUpgrade && labUpgrade.owned > 0) {
-            const availableProducts = getAvailableProducts();
-            const randomProduct = availableProducts[Math.floor(Math.random() * availableProducts.length)];
-            gameState.inventory[randomProduct.id] += labUpgrade.baseProduction * labUpgrade.owned;
-            updateInventoryDisplay();
-        }
-    }
-}
-
-// ==================== UPGRADES ====================
-
-function buyUpgrade(upgradeId, isNightUpgrade = false) {
-    const upgradeList = isNightUpgrade ? gameState.nightUpgrades : gameState.dayUpgrades;
-    const upgrade = upgradeList.find(u => u.id === upgradeId);
-    
-    if (!upgrade) return;
-    
-    const cost = calculateUpgradeCost(upgrade);
-    const useNightMoney = isNightUpgrade;
-    
-    if (canAfford(cost, useNightMoney)) {
-        spendMoney(cost, useNightMoney);
-        upgrade.owned++;
-        
-        // Recalculate stats
-        gameState.clickValue = calculateClickValue();
-        gameState.perSecond = calculatePerSecond();
-        
-        updateDisplay();
-        renderUpgrades();
-    }
-}
-
-function calculateClickValue() {
-    let value = 1;
-    
-    // Apply click multipliers from upgrades
-    gameState.dayUpgrades.forEach(upgrade => {
-        if (upgrade.id === 'equipment' && upgrade.owned > 0) {
-            value *= Math.pow(upgrade.multiplier, upgrade.owned);
-        }
-    });
-    
-    return value;
-}
-
-function renderUpgrades() {
-    // Render day upgrades
-    elements.dayUpgradeList.innerHTML = '';
-    gameState.dayUpgrades.forEach(upgrade => {
-        const cost = calculateUpgradeCost(upgrade);
-        const canBuy = canAfford(cost, false);
-        
-        const div = document.createElement('div');
-        div.className = 'upgrade-item' + (canBuy ? '' : ' locked');
-        div.innerHTML = `
-            <div class="upgrade-header">
-                <span class="upgrade-name">${upgrade.name}</span>
-                <span class="upgrade-cost">${formatMoney(cost)}</span>
-            </div>
-            <div class="upgrade-description">${upgrade.description}</div>
-            <div class="upgrade-owned">Owned: ${upgrade.owned}</div>
-        `;
-        
-        if (canBuy) {
-            div.onclick = () => buyUpgrade(upgrade.id, false);
-        }
-        
-        elements.dayUpgradeList.appendChild(div);
-    });
-    
-    // Render night upgrades
-    elements.nightUpgradeList.innerHTML = '';
-    gameState.nightUpgrades.forEach(upgrade => {
-        const cost = calculateUpgradeCost(upgrade);
-        const canBuy = canAfford(cost, true);
-        
-        const div = document.createElement('div');
-        div.className = 'upgrade-item' + (canBuy ? '' : ' locked');
-        div.innerHTML = `
-            <div class="upgrade-header">
-                <span class="upgrade-name">${upgrade.name}</span>
-                <span class="upgrade-cost">${formatMoney(cost)}</span>
-            </div>
-            <div class="upgrade-description">${upgrade.description}</div>
-            <div class="upgrade-owned">Owned: ${upgrade.owned}</div>
-        `;
-        
-        if (canBuy) {
-            div.onclick = () => buyUpgrade(upgrade.id, true);
-        }
-        
-        elements.nightUpgradeList.appendChild(div);
-    });
-}
-
-// ==================== TIME SYSTEM ====================
-
-function updateTime() {
-    // Increment game time (1 real hour = 24 game hours = 1440 game minutes)
-    // So 1 second = 1440/3600 = 0.4 game minutes
-    gameState.gameTime += 0.4;
-    
-    // Check for new day
-    if (gameState.gameTime >= 24 * 60) {
-        gameState.gameTime = 0;
-        gameState.dayCount++;
-    }
-    
-    // Check for day/night transition
-    const currentHour = Math.floor(gameState.gameTime / 60);
-    const shouldBeNight = currentHour >= 20 || currentHour < 6;
-    
-    if (shouldBeNight !== gameState.isNightMode) {
-        transitionMode(shouldBeNight);
-    }
-    
-    // Update time display
-    elements.gameTime.textContent = formatTime(gameState.gameTime);
-    elements.dayCounter.textContent = `Day ${gameState.dayCount}`;
-    
-    // Update progress bar
-    const progress = (gameState.gameTime / (24 * 60)) * 100;
-    elements.timeProgress.style.width = progress + '%';
-}
-
-function transitionMode(toNightMode) {
-    gameState.isNightMode = toNightMode;
-    
-    // Add transition animation
-    document.getElementById('game-container').classList.add('mode-transition');
-    setTimeout(() => {
-        document.getElementById('game-container').classList.remove('mode-transition');
-    }, 1000);
-    
-    // Update body class
-    if (toNightMode) {
-        document.body.classList.remove('day-mode');
-        document.body.classList.add('night-mode');
-        
-        // Update UI elements for night mode
-        elements.gameTitle.textContent = '🌙 The Underground';
-        document.querySelector('.subtitle').textContent = 'Shh... business after dark';
-        elements.clickText.textContent = 'Craft Product';
-        elements.clickIcon.textContent = '💊';
-        
-        // Show night-specific panels
-        elements.marketPanel.style.display = 'block';
-        elements.inventoryPanel.style.display = 'block';
-        elements.nightUpgradesGroup.style.display = 'block';
-        elements.dayUpgradesGroup.style.display = 'none';
-        
-        // Generate new market prices
-        generateMarketPrices();
-        updateMarketDisplay();
-        updateInventoryDisplay();
-    } else {
-        document.body.classList.remove('night-mode');
-        document.body.classList.add('day-mode');
-        
-        // Update UI elements for day mode
-        elements.gameTitle.textContent = '☀️ Sunny Side Pharmacy';
-        document.querySelector('.subtitle').textContent = 'Your friendly neighborhood pharmacy!';
-        elements.clickText.textContent = 'Fill Prescription';
-        elements.clickIcon.textContent = '💊';
-        
-        // Hide night-specific panels
-        elements.marketPanel.style.display = 'none';
-        elements.inventoryPanel.style.display = 'none';
-        elements.nightUpgradesGroup.style.display = 'none';
-        elements.dayUpgradesGroup.style.display = 'block';
-    }
-    
-    renderUpgrades();
-}
-
-// ==================== MARKET SYSTEM ====================
-
-function getAvailableProducts() {
-    const encryptionUpgrade = gameState.nightUpgrades.find(u => u.id === 'encryption');
-    const unlocked = encryptionUpgrade ? encryptionUpgrade.owned : 0;
-    
-    // Start with 5 products, unlock 2 more with encryption
-    const maxProducts = Math.min(5 + (unlocked * 2), MARKET_PRODUCTS.length);
-    return MARKET_PRODUCTS.slice(0, maxProducts);
-}
-
-function generateMarketPrices() {
-    const availableProducts = getAvailableProducts();
-    
-    availableProducts.forEach(product => {
-        // Random demand: high (2x), normal (1x), or low (0.5x)
-        const demandRoll = Math.random();
-        let demandMultiplier;
-        let demandLevel;
-        
-        if (demandRoll < 0.2) {
-            demandMultiplier = 2;
-            demandLevel = 'high';
-        } else if (demandRoll < 0.8) {
-            demandMultiplier = 1;
-            demandLevel = 'normal';
-        } else {
-            demandMultiplier = 0.5;
-            demandLevel = 'low';
-        }
-        
-        // Add some randomness to price
-        const randomFactor = 0.8 + Math.random() * 0.4;
-        
-        gameState.marketPrices[product.id] = {
-            price: Math.floor(product.basePrice * demandMultiplier * randomFactor),
-            demand: demandLevel,
-            demandMultiplier
-        };
-    });
-}
-
-function updateMarketDisplay() {
-    if (!gameState.isNightMode) return;
-    
-    const availableProducts = getAvailableProducts();
-    elements.marketList.innerHTML = '';
-    
-    availableProducts.forEach(product => {
-        const market = gameState.marketPrices[product.id];
-        if (!market) return;
-        
-        const div = document.createElement('div');
-        div.className = 'market-item';
-        
-        let demandClass = 'demand-normal';
-        let demandText = '→ Normal';
-        if (market.demand === 'high') {
-            demandClass = 'demand-high';
-            demandText = '↑ High';
-        } else if (market.demand === 'low') {
-            demandClass = 'demand-low';
-            demandText = '↓ Low';
-        }
-        
-        div.innerHTML = `
-            <div class="market-header">
-                <span class="market-drug-name">${product.icon} ${product.name}</span>
-                <span class="market-demand ${demandClass}">${demandText}</span>
-            </div>
-            <div class="market-price">Selling at: ${formatMoney(market.price)} each</div>
-        `;
-        
-        elements.marketList.appendChild(div);
-    });
-}
-
-function updateInventoryDisplay() {
-    if (!gameState.isNightMode) return;
-    
-    const availableProducts = getAvailableProducts();
-    elements.inventoryList.innerHTML = '';
-    
-    availableProducts.forEach(product => {
-        const quantity = gameState.inventory[product.id] || 0;
-        
-        const div = document.createElement('div');
-        div.className = 'inventory-item';
-        div.innerHTML = `
-            <span>${product.icon} ${product.name}: ${quantity}</span>
-            <div class="inventory-actions">
-                <button class="inventory-btn" onclick="sellProduct('${product.id}', 1)" ${quantity < 1 ? 'disabled' : ''}>Sell 1</button>
-                <button class="inventory-btn" onclick="sellProduct('${product.id}', 10)" ${quantity < 10 ? 'disabled' : ''}>Sell 10</button>
-                <button class="inventory-btn" onclick="sellProduct('${product.id}', 'all')" ${quantity < 1 ? 'disabled' : ''}>Sell All</button>
-            </div>
-        `;
-        
-        elements.inventoryList.appendChild(div);
-    });
-}
-
-function sellProduct(productId, amount) {
-    const quantity = gameState.inventory[productId] || 0;
-    const market = gameState.marketPrices[productId];
-    
-    if (!market || quantity < 1) return;
-    
-    let sellAmount;
-    if (amount === 'all') {
-        sellAmount = quantity;
-    } else {
-        sellAmount = Math.min(amount, quantity);
-    }
-    
-    // Calculate earnings with potential bulk bonus
-    let totalEarnings = market.price * sellAmount;
-    
-    const distributionUpgrade = gameState.nightUpgrades.find(u => u.id === 'distribution');
-    if (distributionUpgrade && distributionUpgrade.owned > 0 && sellAmount >= 10) {
-        totalEarnings *= distributionUpgrade.multiplier;
-    }
-    
-    gameState.inventory[productId] -= sellAmount;
-    gameState.nightMoney += totalEarnings;
-    gameState.totalEarned += totalEarnings;
-    
-    updateDisplay();
-    updateInventoryDisplay();
-}
-
-// Make sellProduct global so it can be called from HTML
-window.sellProduct = sellProduct;
-
-// ==================== DISPLAY UPDATES ====================
 
 function updateDisplay() {
-    elements.dayMoney.textContent = formatMoney(gameState.dayMoney);
-    elements.nightMoney.textContent = formatMoney(gameState.nightMoney);
-    elements.totalMoney.textContent = formatMoney(getTotalMoney());
+    document.getElementById('money').textContent = formatMoney(gameState.money);
     
-    elements.clickValue.textContent = formatMoney(gameState.clickValue);
-    elements.perSecond.textContent = formatMoney(gameState.perSecond) + '/s';
-    elements.totalEarned.textContent = formatMoney(gameState.totalEarned);
+    const pillsPerSecond = calculateAutoProduction();
+    const moneyPerSecond = pillsPerSecond * 0.5; // Rough estimate
+    document.getElementById('moneyPerSecond').textContent = moneyPerSecond >= 1 ? formatMoney(moneyPerSecond) : '$0.00';
+    
+    document.getElementById('perClick').textContent = gameState.pillsPerClick;
+    document.getElementById('totalClicks').textContent = Math.floor(gameState.totalProduced);
+    
+    // Update pill inventory in header
+    Object.entries(pillTypes).forEach(([type, pill]) => {
+        const element = document.getElementById(`pillInventory-${type}`);
+        if (element) {
+            element.textContent = `${pill.icon} ${Math.floor(gameState.inventory[type])}`;
+        }
+    });
+    
+    // Update pill buttons (less frequently)
+    renderPillButtons();
 }
 
-// ==================== SAVE/LOAD ====================
-
+// ===========================
+// Auto-save System
+// ===========================
 function saveGame() {
     const saveData = {
         ...gameState,
         saveTime: Date.now()
     };
-    
     localStorage.setItem('pharmacyClickerSave', JSON.stringify(saveData));
-    
-    elements.saveIndicator.textContent = '✓ Game saved!';
-    setTimeout(() => {
-        elements.saveIndicator.textContent = '';
-    }, 2000);
 }
 
 function loadGame() {
-    const saveData = localStorage.getItem('pharmacyClickerSave');
-    
-    if (saveData) {
-        const loaded = JSON.parse(saveData);
-        
-        // Restore state
-        Object.assign(gameState, loaded);
-        
-        // Calculate offline progress
-        const timePassed = (Date.now() - loaded.saveTime) / 1000; // in seconds
-        const offlineEarnings = gameState.perSecond * Math.min(timePassed, 3600); // Max 1 hour
-        
-        if (offlineEarnings > 0) {
-            gameState.dayMoney += offlineEarnings;
-            gameState.totalEarned += offlineEarnings;
-            alert(`Welcome back! You earned ${formatMoney(offlineEarnings)} while away!`);
-        }
-        
-        // Set mode based on loaded time
-        const currentHour = Math.floor(gameState.gameTime / 60);
-        const shouldBeNight = currentHour >= 20 || currentHour < 6;
-        
-        if (shouldBeNight) {
-            document.body.classList.add('night-mode');
-            gameState.isNightMode = true;
-        } else {
-            document.body.classList.add('day-mode');
-            gameState.isNightMode = false;
-        }
-        
-        updateDisplay();
-        renderUpgrades();
-        
-        if (gameState.isNightMode) {
-            generateMarketPrices();
-            updateMarketDisplay();
-            updateInventoryDisplay();
-            elements.marketPanel.style.display = 'block';
-            elements.inventoryPanel.style.display = 'block';
+    const saved = localStorage.getItem('pharmacyClickerSave');
+    if (saved) {
+        try {
+            const loadedState = JSON.parse(saved);
+            
+            // Preserve startTime for time calculation - don't reload it
+            const originalStartTime = gameState.startTime;
+            
+            // Calculate offline progress
+            const offlineTime = Date.now() - (loadedState.saveTime || Date.now());
+            
+            // Only load compatible data
+            Object.assign(gameState, loadedState);
+            
+            // ALWAYS keep the original game session start time
+            gameState.startTime = originalStartTime;
+            
+            // Ensure upgrades are properly initialized
+            upgradeDefinitions.forEach(def => {
+                if (!gameState.upgrades[def.id]) {
+                    gameState.upgrades[def.id] = {
+                        level: 0,
+                        cost: def.baseCost
+                    };
+                }
+            });
+            
+            // Add offline production (capped at 1 hour)
+            if (offlineTime > 0 && offlineTime < 3600000) {
+                autoProducePills(Math.min(offlineTime, 3600000));
+            }
+            
+            console.log('Game loaded from save');
+        } catch (e) {
+            console.error('Error loading game:', e);
+            // Clear corrupted save
+            localStorage.removeItem('pharmacyClickerSave');
+            // Reset to default state
+            gameState.pillsPerClick = 1;
         }
     } else {
-        // New game
-        document.body.classList.add('day-mode');
+        console.log('Starting fresh game');
     }
 }
 
-function resetGame() {
-    if (confirm('Are you sure you want to reset? All progress will be lost!')) {
-        localStorage.removeItem('pharmacyClickerSave');
-        location.reload();
-    }
-}
-
-// ==================== EVENT LISTENERS ====================
-
-elements.clickButton.addEventListener('click', handleClick);
-elements.saveButton.addEventListener('click', saveGame);
-elements.resetButton.addEventListener('click', resetGame);
-
-// ==================== GAME LOOP ====================
+// ===========================
+// Game Loop
+// ===========================
+let lastUpdate = Date.now();
+let renderCounter = 0;
+let lastOrderCount = 0;
+let lastUpgradeState = {};
 
 function gameLoop() {
-    updateTime();
-    applyPassiveIncome();
-    renderUpgrades();
+    const now = Date.now();
+    const deltaTime = now - lastUpdate;
+    lastUpdate = now;
+    
+    // Auto-produce pills
+    autoProducePills(deltaTime);
+    
+    updateDisplay();
+    updateGameTime();
+    
+    // Only re-render orders and upgrades when state changes (every second at most)
+    renderCounter++;
+    if (renderCounter >= 10) {
+        renderCounter = 0;
+        
+        // Only re-render if order count changed
+        if (gameState.orders.length !== lastOrderCount) {
+            lastOrderCount = gameState.orders.length;
+            renderOrders();
+        }
+        
+        // Only re-render upgrades if money changed significantly
+        const moneyKey = Math.floor(gameState.money / 10);
+        if (!lastUpgradeState.money || lastUpgradeState.money !== moneyKey) {
+            lastUpgradeState.money = moneyKey;
+            renderUpgrades();
+        }
+    }
 }
 
-// Auto-save every 30 seconds
-setInterval(saveGame, 30000);
+// ===========================
+// Initialization
+// ===========================
 
-// Main game loop - runs every second
-setInterval(gameLoop, 1000);
+// Allow resetting the game from console
+window.resetGame = function() {
+    localStorage.removeItem('pharmacyClickerSave');
+    location.reload();
+};
 
-// ==================== START GAME ====================
+function init() {
+    console.log('Starting initialization...');
+    loadGame();
+    console.log('Game loaded. Current state:', gameState);
+    
+    // Event listeners
+    document.getElementById('clickerButton').addEventListener('click', handleClick);
+    
+    // Initial render
+    console.log('Rendering pill buttons...');
+    selectPillType('aspirin');
+    renderPillButtons();
+    console.log('Updating display...');
+    updateDisplay();
+    console.log('Rendering orders and upgrades...');
+    renderOrders();
+    renderUpgrades();
+    
+    // Generate initial orders
+    console.log('Generating initial orders...');
+    for (let i = 0; i < 3; i++) {
+        generateOrder();
+    }
+    
+    // Initial render after orders are generated
+    renderOrders();
+    console.log('Final state:', gameState);
+    
+    // Game loop - 10 times per second for smooth updates
+    setInterval(gameLoop, 100);
+    
+    // Generate new orders periodically
+    setInterval(() => {
+        if (gameState.orders.length < 6) {
+            generateOrder();
+            renderOrders();
+        }
+    }, 8000);
+    
+    // Auto-save every 15 seconds
+    setInterval(saveGame, 15000);
+    
+    console.log('🏥 Pharmacy Clicker v2.0 initialized!');
+}
 
-loadGame();
-updateDisplay();
-renderUpgrades();
+// Start the game when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
